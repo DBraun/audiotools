@@ -4,8 +4,8 @@ from typing import List
 import numpy as np
 from torch import nn
 
-from .. import AudioSignal
-from .. import STFTParams
+from audiotools.backend.torch import AudioSignal
+from audiotools.backend.torch import STFTParams
 
 
 class MultiScaleSTFTLoss(nn.Module):

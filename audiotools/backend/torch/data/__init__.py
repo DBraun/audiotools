@@ -1,3 +1,3 @@
-from . import datasets
-from . import preprocess
-from . import transforms
+from audiotools.backend.torch.data import datasets
+from audiotools.backend.torch.data import preprocess
+from audiotools.backend.torch.data import transforms

@@ -9,10 +9,10 @@ from flatten_dict import flatten
 from flatten_dict import unflatten
 from numpy.random import RandomState
 
-from .. import ml
-from ..core import AudioSignal
-from ..core import util
-from .datasets import AudioLoader
+from audiotools.backend.torch import ml
+from audiotools.backend.torch.core import AudioSignal
+from audiotools.backend.torch.core import util
+from audiotools.backend.torch.data.datasets import AudioLoader
 
 tt = torch.tensor
 """Shorthand for converting things to torch.tensor."""

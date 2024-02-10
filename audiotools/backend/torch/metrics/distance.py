@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from .. import AudioSignal
+from audiotools.backend.torch import AudioSignal
 
 
 class L1Loss(nn.L1Loss):

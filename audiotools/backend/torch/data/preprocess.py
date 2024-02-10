@@ -4,7 +4,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from ..core import AudioSignal
+from audiotools.backend.torch.core import AudioSignal
 
 
 def create_csv(

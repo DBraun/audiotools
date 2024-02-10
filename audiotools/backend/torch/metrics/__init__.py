@@ -1,6 +1,6 @@
 """
 Functions for comparing AudioSignal objects to one another.
 """  # fmt: skip
-from . import distance
-from . import quality
-from . import spectral
+from audiotools.backend.torch.metrics import distance
+from audiotools.backend.torch.metrics import quality
+from audiotools.backend.torch.metrics import spectral

@@ -18,6 +18,7 @@ from audiotools.backend import STFTParams
 from audiotools.backend import Meter
 from audiotools.backend import util
 from audiotools.backend import metrics
+from audiotools.backend import core
 from audiotools.backend import data
 from audiotools.backend import ml
 from audiotools.backend import datasets

@@ -8,8 +8,8 @@ import numpy as np
 from torch.utils.data import SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
 
-from ..core import AudioSignal
-from ..core import util
+from audiotools.backend.torch.core import AudioSignal
+from audiotools.backend.torch.core import util
 
 
 class AudioLoader:
