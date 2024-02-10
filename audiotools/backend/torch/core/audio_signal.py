@@ -14,15 +14,15 @@ import numpy as np
 import soundfile
 import torch
 
-from . import util
-from .display import DisplayMixin
-from .dsp import DSPMixin
-from .effects import EffectMixin
-from .effects import ImpulseResponseMixin
-from .ffmpeg import FFMPEGMixin
-from .loudness import LoudnessMixin
-from .playback import PlayMixin
-from .whisper import WhisperMixin
+from audiotools.backend.torch.core import util
+from audiotools.backend.torch.core.display import DisplayMixin
+from audiotools.backend.torch.core.dsp import DSPMixin
+from audiotools.backend.torch.core.effects import EffectMixin
+from audiotools.backend.torch.core.effects import ImpulseResponseMixin
+from audiotools.backend.torch.core.ffmpeg import FFMPEGMixin
+from audiotools.backend.torch.core.loudness import LoudnessMixin
+from audiotools.backend.torch.core.playback import PlayMixin
+from audiotools.backend.torch.core.whisper import WhisperMixin
 
 
 STFTParams = namedtuple(

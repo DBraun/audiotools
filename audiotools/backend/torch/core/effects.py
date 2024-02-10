@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torchaudio
 
-from . import util
+from audiotools.backend.torch.core import util
 
 
 class EffectMixin:

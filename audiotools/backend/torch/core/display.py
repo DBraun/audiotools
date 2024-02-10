@@ -2,7 +2,7 @@ import inspect
 import typing
 from functools import wraps
 
-from . import util
+from audiotools.backend.torch.core import util
 
 
 def format_figure(func):

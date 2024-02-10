@@ -4,7 +4,7 @@ import julius
 import numpy as np
 import torch
 
-from . import util
+from audiotools.backend.torch.core import util
 
 
 class DSPMixin:

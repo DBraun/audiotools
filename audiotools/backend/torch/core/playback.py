@@ -12,7 +12,7 @@ from tempfile import NamedTemporaryFile
 
 import importlib_resources as pkg_resources
 
-from . import templates
+from audiotools.core import templates
 from .util import _close_temp_files
 from .util import format_figure
 
