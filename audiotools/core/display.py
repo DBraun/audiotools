@@ -1,6 +1,7 @@
 import inspect
 import typing
 from functools import wraps
+import numpy as np
 
 from . import util
 
@@ -152,7 +153,7 @@ class DisplayMixin:
         """
         import matplotlib.pyplot as plt
 
-        audio_data = self.audio_data[0, 0].detach().cpu()
+        audio_data = np.array(self.audio_data[0, 0])
         sample_rate = self.sample_rate
         writer.add_audio(tag, audio_data, step, sample_rate)
 

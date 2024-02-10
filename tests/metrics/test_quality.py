@@ -1,7 +1,5 @@
 import numpy as np
 import pytest
-import torch
-import torchaudio
 
 import audiotools
 from audiotools import AudioSignal

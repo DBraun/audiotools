@@ -1,12 +1,9 @@
-import tempfile
 import typing
-import zipfile
-from pathlib import Path
 
 import markdown2 as md
 import matplotlib.pyplot as plt
-import torch
 from IPython.display import HTML
+from core.util import is_tensor
 
 
 def audio_table(
@@ -50,7 +47,7 @@ def audio_table(
     columns = None
 
     def _default_format_fn(label, x, **kwargs):
-        if torch.is_tensor(x):
+        if is_tensor(x):
             x = x.tolist()
 
         if x is None:

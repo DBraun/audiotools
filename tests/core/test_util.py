@@ -35,7 +35,7 @@ def test_seed():
     np_result_a = np.random.randn(1)
     py_result_a = random.random()
 
-    util.seed(0, set_cudnn=True)
+    util.seed(0)
     torch_result_b = torch.randn(1)
     np_result_b = np.random.randn(1)
     py_result_b = random.random()

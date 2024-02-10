@@ -137,6 +137,7 @@ test_out.md
 *.html
 *.exec.md
 .DS_Store
+.idea
 
 # generated test data
 tests/audio/chords/

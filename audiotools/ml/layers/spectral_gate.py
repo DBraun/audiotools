@@ -1,6 +1,6 @@
-import torch
-import torch.nn.functional as F
-from torch import nn
+import jax
+import jax.numpy as jnp
+import flax.linen as nn
 
 from ...core import AudioSignal
 from ...core import STFTParams
@@ -34,28 +34,11 @@ class SpectralGate(nn.Module):
         Number of time bins to smooth by, by default 5
     """
 
-    def __init__(self, n_freq: int = 3, n_time: int = 5):
-        super().__init__()
+    n_freq: int = 3
+    n_time: int = 5
 
-        smoothing_filter = torch.outer(
-            torch.cat(
-                [
-                    torch.linspace(0, 1, n_freq + 2)[:-1],
-                    torch.linspace(1, 0, n_freq + 2),
-                ]
-            )[..., 1:-1],
-            torch.cat(
-                [
-                    torch.linspace(0, 1, n_time + 2)[:-1],
-                    torch.linspace(1, 0, n_time + 2),
-                ]
-            )[..., 1:-1],
-        )
-        smoothing_filter = smoothing_filter / smoothing_filter.sum()
-        smoothing_filter = smoothing_filter.unsqueeze(0).unsqueeze(0)
-        self.register_buffer("smoothing_filter", smoothing_filter)
-
-    def forward(
+    @nn.compact
+    def __call__(
         self,
         audio_signal: AudioSignal,
         nz_signal: AudioSignal,
@@ -87,6 +70,23 @@ class SpectralGate(nn.Module):
         AudioSignal
             Denoised audio signal.
         """
+        smoothing_filter = jnp.outer(
+            jnp.concatenate(
+                [
+                    jnp.linspace(0, 1, self.n_freq + 2)[:-1],
+                    jnp.linspace(1, 0, self.n_freq + 2),
+                ]
+            )[..., 1:-1],
+            jnp.concatenate(
+                [
+                    jnp.linspace(0, 1, self.n_time + 2)[:-1],
+                    jnp.linspace(1, 0, self.n_time + 2),
+                ]
+            )[..., 1:-1],
+        )
+        smoothing_filter = smoothing_filter / smoothing_filter.sum()
+        smoothing_filter = jnp.expand_dims(smoothing_filter, (0, 0))
+
         stft_params = STFTParams(win_length, hop_length, "sqrt_hann")
 
         audio_signal = audio_signal.clone()
@@ -96,29 +96,28 @@ class SpectralGate(nn.Module):
         nz_signal = nz_signal.clone()
         nz_signal.stft_params = stft_params
 
-        nz_stft_db = 20 * nz_signal.magnitude.clamp(1e-4).log10()
-        nz_freq_mean = nz_stft_db.mean(keepdim=True, dim=-1)
-        nz_freq_std = nz_stft_db.std(keepdim=True, dim=-1)
+        nz_stft_db = 20 * jnp.log10(jnp.maximum(nz_signal.magnitude, 1e-4))
+        nz_freq_mean = nz_stft_db.mean(keepdims=True, axis=-1)
+        nz_freq_std = nz_stft_db.std(keepdims=True, axis=-1)
 
         nz_thresh = nz_freq_mean + nz_freq_std * n_std
 
-        stft_db = 20 * audio_signal.magnitude.clamp(1e-4).log10()
+        stft_db = 20 * jnp.log10(jnp.maximum(audio_signal.magnitude, 1e-4))
         nb, nac, nf, nt = stft_db.shape
-        db_thresh = nz_thresh.expand(nb, nac, -1, nt)
+        # db_thresh = nz_thresh.expand(nb, nac, -1, nt)
+        db_thresh = jnp.tile(nz_thresh, (nb/nz_thresh.shape[0], nac/nz_thresh.shape[1], 1, nt/nz_thresh.shape[3]))  # todo:
 
-        stft_mask = (stft_db < db_thresh).float()
+        stft_mask = (stft_db < db_thresh).astype(jnp.float32)
         shape = stft_mask.shape
 
         stft_mask = stft_mask.reshape(nb * nac, 1, nf, nt)
         pad_tuple = (
-            self.smoothing_filter.shape[-2] // 2,
-            self.smoothing_filter.shape[-1] // 2,
+            smoothing_filter.shape[-2] // 2,
+            smoothing_filter.shape[-1] // 2,
         )
-        stft_mask = F.conv2d(stft_mask, self.smoothing_filter, padding=pad_tuple)
+        stft_mask = F.conv2d(stft_mask, smoothing_filter, padding=pad_tuple)
         stft_mask = stft_mask.reshape(*shape)
-        stft_mask *= util.ensure_tensor(denoise_amount, ndim=stft_mask.ndim).to(
-            audio_signal.device
-        )
+        stft_mask = stft_mask * util.ensure_tensor(denoise_amount, ndim=stft_mask.ndim)
         stft_mask = 1 - stft_mask
 
         audio_signal.stft_data *= stft_mask

@@ -1,7 +1,7 @@
 import os
 
 import numpy as np
-import torch
+import jax.numpy as jnp
 
 from .. import AudioSignal
 
@@ -52,13 +52,13 @@ def stoi(
     stois = []
     for i in range(estimates.batch_size):
         _stoi = pystoi.stoi(
-            references.audio_data[i, 0].detach().cpu().numpy(),
-            estimates.audio_data[i, 0].detach().cpu().numpy(),
+            np.array(references.audio_data[i, 0]),
+            np.array(estimates.audio_data[i, 0]),
             references.sample_rate,
             extended=extended,
         )
         stois.append(_stoi)
-    return torch.from_numpy(np.array(stois))
+    return jnp.array(np.array(stois))
 
 
 def pesq(
@@ -99,7 +99,7 @@ def pesq(
             mode,
         )
         pesqs.append(_pesq)
-    return torch.from_numpy(np.array(pesqs))
+    return jnp.array(np.array(pesqs))
 
 
 def visqol(
@@ -152,8 +152,8 @@ def visqol(
     visqols = []
     for i in range(estimates.batch_size):
         _visqol = api.Measure(
-            references.audio_data[i, 0].detach().cpu().numpy().astype(float),
-            estimates.audio_data[i, 0].detach().cpu().numpy().astype(float),
+            np.array(references.audio_data[i, 0], dtype=np.float32),
+            np.array(estimates.audio_data[i, 0], dtype=np.float32),
         )
         visqols.append(_visqol.moslqo)
-    return torch.from_numpy(np.array(visqols))
+    return jnp.array(np.array(visqols))

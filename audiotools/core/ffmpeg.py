@@ -7,8 +7,7 @@ from typing import Tuple
 
 import ffmpy
 import numpy as np
-import torch
-
+import jax.numpy as jnp
 
 def r128stats(filepath: str, quiet: bool):
     """Takes a path to an audio file, returns a dict with the loudness
@@ -98,7 +97,7 @@ class FFMPEGMixin:
 
         Returns
         -------
-        torch.Tensor
+        jnp.ndarray
             Loudness of every item in the batch, computed via
             FFMPEG.
         """
@@ -110,7 +109,7 @@ class FFMPEGMixin:
                 loudness_stats = r128stats(f.name, quiet=quiet)
                 loudness.append(loudness_stats["I"])
 
-        self._loudness = torch.from_numpy(np.array(loudness)).float()
+        self._loudness = jnp.array(loudness, dtype=jnp.float32)
         return self.loudness()
 
     def ffmpeg_resample(self, sample_rate: int, quiet: bool = True):

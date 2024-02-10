@@ -6,19 +6,15 @@ class WhisperMixin:
 
     def setup_whisper(
         self,
-        pretrained_model_name_or_path: str = "openai/whisper-base.en",
-        device: str = torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+        pretrained_model_name_or_path: str = "openai/whisper-base.en"
     ):
         from transformers import WhisperForConditionalGeneration
         from transformers import WhisperProcessor
 
-        self.whisper_device = device
         self.whisper_processor = WhisperProcessor.from_pretrained(
             pretrained_model_name_or_path
         )
-        self.whisper_model = WhisperForConditionalGeneration.from_pretrained(
-            pretrained_model_name_or_path
-        ).to(self.whisper_device)
+        self.whisper_model = WhisperForConditionalGeneration.from_pretrained(pretrained_model_name_or_path)
         self.is_initialized = True
 
     def get_whisper_features(self) -> torch.Tensor:
@@ -34,10 +30,9 @@ class WhisperMixin:
         if not self.is_initialized:
             self.setup_whisper()
 
-        signal = self.to(self.device)
         raw_speech = list(
             (
-                signal.clone()
+                self.clone()
                 .resample(self.whisper_processor.feature_extractor.sampling_rate)
                 .audio_data[:, 0, :]
                 .numpy()
@@ -68,7 +63,6 @@ class WhisperMixin:
         input_features = self.get_whisper_features()
 
         with torch.inference_mode():
-            input_features = input_features.to(self.whisper_device)
             generated_ids = self.whisper_model.generate(inputs=input_features)
 
         transcription = self.whisper_processor.batch_decode(generated_ids)
@@ -91,7 +85,6 @@ class WhisperMixin:
         encoder = self.whisper_model.get_encoder()
 
         with torch.inference_mode():
-            input_features = input_features.to(self.whisper_device)
             embeddings = encoder(input_features)
 
         return embeddings.last_hidden_state

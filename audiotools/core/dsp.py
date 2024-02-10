@@ -1,8 +1,8 @@
 import typing
 
-import julius
+import jax
+import jax.numpy as jnp
 import numpy as np
-import torch
 
 from . import util
 
@@ -135,7 +135,7 @@ class DSPMixin:
             stride=(1, hop_length),
         )
 
-        norm = torch.ones_like(unfolded, device=unfolded.device)
+        norm = jnp.ones_like(unfolded)
         norm = torch.nn.functional.fold(
             norm,
             output_size=(1, self._padded_signal_length),
@@ -151,7 +151,7 @@ class DSPMixin:
         return self
 
     def low_pass(
-        self, cutoffs: typing.Union[torch.Tensor, np.ndarray, float], zeros: int = 51
+        self, cutoffs: typing.Union[jnp.ndarray, np.ndarray, float], zeros: int = 51
     ):
         """Low-passes the signal in-place. Each item in the batch
         can have a different low-pass cutoff, if the input
@@ -160,7 +160,7 @@ class DSPMixin:
 
         Parameters
         ----------
-        cutoffs : typing.Union[torch.Tensor, np.ndarray, float]
+        cutoffs : typing.Union[jnp.ndarray, np.ndarray, float]
             Cutoff in Hz of low-pass filter.
         zeros : int, optional
             Number of taps to use in low-pass filter, by default 51
@@ -172,10 +172,10 @@ class DSPMixin:
         """
         cutoffs = util.ensure_tensor(cutoffs, 2, self.batch_size)
         cutoffs = cutoffs / self.sample_rate
-        filtered = torch.empty_like(self.audio_data)
+        filtered = jnp.empty_like(self.audio_data)
 
         for i, cutoff in enumerate(cutoffs):
-            lp_filter = julius.LowPassFilter(cutoff.cpu(), zeros=zeros).to(self.device)
+            lp_filter = julius.LowPassFilter(cutoff.cpu(), zeros=zeros)
             filtered[i] = lp_filter(self.audio_data[i])
 
         self.audio_data = filtered
@@ -183,7 +183,7 @@ class DSPMixin:
         return self
 
     def high_pass(
-        self, cutoffs: typing.Union[torch.Tensor, np.ndarray, float], zeros: int = 51
+        self, cutoffs: typing.Union[jnp.ndarray, np.ndarray, float], zeros: int = 51
     ):
         """High-passes the signal in-place. Each item in the batch
         can have a different high-pass cutoff, if the input
@@ -192,7 +192,7 @@ class DSPMixin:
 
         Parameters
         ----------
-        cutoffs : typing.Union[torch.Tensor, np.ndarray, float]
+        cutoffs : typing.Union[jnp.ndarray, np.ndarray, float]
             Cutoff in Hz of high-pass filter.
         zeros : int, optional
             Number of taps to use in high-pass filter, by default 51
@@ -204,10 +204,10 @@ class DSPMixin:
         """
         cutoffs = util.ensure_tensor(cutoffs, 2, self.batch_size)
         cutoffs = cutoffs / self.sample_rate
-        filtered = torch.empty_like(self.audio_data)
+        filtered = jnp.empty_like(self.audio_data)
 
         for i, cutoff in enumerate(cutoffs):
-            hp_filter = julius.HighPassFilter(cutoff.cpu(), zeros=zeros).to(self.device)
+            hp_filter = julius.HighPassFilter(cutoff.cpu(), zeros=zeros)
             filtered[i] = hp_filter(self.audio_data[i])
 
         self.audio_data = filtered
@@ -216,8 +216,8 @@ class DSPMixin:
 
     def mask_frequencies(
         self,
-        fmin_hz: typing.Union[torch.Tensor, np.ndarray, float],
-        fmax_hz: typing.Union[torch.Tensor, np.ndarray, float],
+        fmin_hz: typing.Union[jnp.ndarray, np.ndarray, float],
+        fmax_hz: typing.Union[jnp.ndarray, np.ndarray, float],
         val: float = 0.0,
     ):
         """Masks frequencies between ``fmin_hz`` and ``fmax_hz``, and fills them
@@ -226,9 +226,9 @@ class DSPMixin:
 
         Parameters
         ----------
-        fmin_hz : typing.Union[torch.Tensor, np.ndarray, float]
+        fmin_hz : typing.Union[jnp.ndarray, np.ndarray, float]
             Lower end of band to mask out.
-        fmax_hz : typing.Union[torch.Tensor, np.ndarray, float]
+        fmax_hz : typing.Union[jnp.ndarray, np.ndarray, float]
             Upper end of band to mask out.
         val : float, optional
             Value to fill in, by default 0.0
@@ -243,26 +243,25 @@ class DSPMixin:
         mag, phase = self.magnitude, self.phase
         fmin_hz = util.ensure_tensor(fmin_hz, ndim=mag.ndim)
         fmax_hz = util.ensure_tensor(fmax_hz, ndim=mag.ndim)
-        assert torch.all(fmin_hz < fmax_hz)
+        assert jnp.all(fmin_hz < fmax_hz)
 
         # build mask
         nbins = mag.shape[-2]
-        bins_hz = torch.linspace(0, self.sample_rate / 2, nbins, device=self.device)
+        bins_hz = jnp.linspace(start=0, stop=self.sample_rate / 2, num=nbins)
         bins_hz = bins_hz[None, None, :, None].repeat(
             self.batch_size, 1, 1, mag.shape[-1]
         )
         mask = (fmin_hz <= bins_hz) & (bins_hz < fmax_hz)
-        mask = mask.to(self.device)
 
         mag = mag.masked_fill(mask, val)
         phase = phase.masked_fill(mask, val)
-        self.stft_data = mag * torch.exp(1j * phase)
+        self.stft_data = mag * jnp.exp(1j * phase)
         return self
 
     def mask_timesteps(
         self,
-        tmin_s: typing.Union[torch.Tensor, np.ndarray, float],
-        tmax_s: typing.Union[torch.Tensor, np.ndarray, float],
+        tmin_s: typing.Union[jnp.ndarray, np.ndarray, float],
+        tmax_s: typing.Union[jnp.ndarray, np.ndarray, float],
         val: float = 0.0,
     ):
         """Masks timesteps between ``tmin_s`` and ``tmax_s``, and fills them
@@ -271,9 +270,9 @@ class DSPMixin:
 
         Parameters
         ----------
-        tmin_s : typing.Union[torch.Tensor, np.ndarray, float]
+        tmin_s : typing.Union[jnp.ndarray, np.ndarray, float]
             Lower end of timesteps to mask out.
-        tmax_s : typing.Union[torch.Tensor, np.ndarray, float]
+        tmax_s : typing.Union[jnp.ndarray, np.ndarray, float]
             Upper end of timesteps to mask out.
         val : float, optional
             Value to fill in, by default 0.0
@@ -289,11 +288,11 @@ class DSPMixin:
         tmin_s = util.ensure_tensor(tmin_s, ndim=mag.ndim)
         tmax_s = util.ensure_tensor(tmax_s, ndim=mag.ndim)
 
-        assert torch.all(tmin_s < tmax_s)
+        assert jnp.all(tmin_s < tmax_s)
 
         # build mask
         nt = mag.shape[-1]
-        bins_t = torch.linspace(0, self.signal_duration, nt, device=self.device)
+        bins_t = jnp.linspace(0, self.signal_duration, nt)
         bins_t = bins_t[None, None, None, :].repeat(
             self.batch_size, 1, mag.shape[-2], 1
         )
@@ -301,18 +300,18 @@ class DSPMixin:
 
         mag = mag.masked_fill(mask, val)
         phase = phase.masked_fill(mask, val)
-        self.stft_data = mag * torch.exp(1j * phase)
+        self.stft_data = mag * jnp.exp(1j * phase)
         return self
 
     def mask_low_magnitudes(
-        self, db_cutoff: typing.Union[torch.Tensor, np.ndarray, float], val: float = 0.0
+        self, db_cutoff: typing.Union[jnp.ndarray, np.ndarray, float], val: float = 0.0
     ):
         """Mask away magnitudes below a specified threshold, which
         can be different for every item in the batch.
 
         Parameters
         ----------
-        db_cutoff : typing.Union[torch.Tensor, np.ndarray, float]
+        db_cutoff : typing.Union[jnp.ndarray, np.ndarray, float]
             Decibel value for which things below it will be masked away.
         val : float, optional
             Value to fill in for masked portions, by default 0.0
@@ -333,12 +332,12 @@ class DSPMixin:
         self.magnitude = mag
         return self
 
-    def shift_phase(self, shift: typing.Union[torch.Tensor, np.ndarray, float]):
+    def shift_phase(self, shift: typing.Union[jnp.ndarray, np.ndarray, float]):
         """Shifts the phase by a constant value.
 
         Parameters
         ----------
-        shift : typing.Union[torch.Tensor, np.ndarray, float]
+        shift : typing.Union[jnp.ndarray, np.ndarray, float]
             What to shift the phase by.
 
         Returns
@@ -351,12 +350,12 @@ class DSPMixin:
         self.phase = self.phase + shift
         return self
 
-    def corrupt_phase(self, scale: typing.Union[torch.Tensor, np.ndarray, float]):
+    def corrupt_phase(self, scale: typing.Union[jnp.ndarray, np.ndarray, float]):
         """Corrupts the phase randomly by some scaled value.
 
         Parameters
         ----------
-        scale : typing.Union[torch.Tensor, np.ndarray, float]
+        scale : typing.Union[jnp.ndarray, np.ndarray, float]
             Standard deviation of noise to add to the phase.
 
         Returns
@@ -383,7 +382,7 @@ class DSPMixin:
         AudioSignal
             Pre-emphasized signal.
         """
-        kernel = torch.tensor([1, -coef, 0]).view(1, 1, -1).to(self.device)
+        kernel = jnp.array([1, -coef, 0]).reshape(1, 1, -1)
         x = self.audio_data.reshape(-1, 1, self.signal_length)
         x = torch.nn.functional.conv1d(x, kernel, padding=1)
         self.audio_data = x.reshape(*self.audio_data.shape)

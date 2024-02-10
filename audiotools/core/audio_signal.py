@@ -9,20 +9,21 @@ import warnings
 from collections import namedtuple
 from pathlib import Path
 
-import julius
+import jax
+import jax.numpy as jnp
 import numpy as np
 import soundfile
-import torch
 
 from . import util
 from .display import DisplayMixin
-from .dsp import DSPMixin
+# from .dsp import DSPMixin
 from .effects import EffectMixin
 from .effects import ImpulseResponseMixin
+from .effects import ResampleFrac
 from .ffmpeg import FFMPEGMixin
 from .loudness import LoudnessMixin
 from .playback import PlayMixin
-from .whisper import WhisperMixin
+# from .whisper import WhisperMixin
 
 
 STFTParams = namedtuple(
@@ -41,7 +42,7 @@ window_length : int, optional
 hop_length : int, optional
     Hop length of STFT, by default ``window_length // 4``.
 window_type : str, optional
-    Type of window to use, by default ``sqrt\_hann``.
+    Type of window to use, by default ``hann``.
 match_stride : bool, optional
     Whether to match the stride of convolutional layers, by default False
 padding_type : str, optional
@@ -55,10 +56,10 @@ class AudioSignal(
     LoudnessMixin,
     PlayMixin,
     ImpulseResponseMixin,
-    DSPMixin,
+    # DSPMixin,
     DisplayMixin,
     FFMPEGMixin,
-    WhisperMixin,
+    # WhisperMixin,
 ):
     """This is the core object of this library. Audio is always
     loaded into an AudioSignal, which then enables all the features
@@ -74,7 +75,7 @@ class AudioSignal(
 
     Parameters
     ----------
-    audio_path_or_array : typing.Union[torch.Tensor, str, Path, np.ndarray]
+    audio_path_or_array : typing.Union[jnp.ndarray, str, Path, np.ndarray]
         Object to create AudioSignal from. Can be a tensor, numpy array,
         or a path to a file. The file is always reshaped to
     sample_rate : int, optional
@@ -87,8 +88,6 @@ class AudioSignal(
         Offset in seconds to read from file, by default 0
     duration : float, optional
         Duration in seconds to read from file, by default None
-    device : str, optional
-        Device to load audio onto, by default None
 
     Examples
     --------
@@ -121,12 +120,11 @@ class AudioSignal(
 
     def __init__(
         self,
-        audio_path_or_array: typing.Union[torch.Tensor, str, Path, np.ndarray],
+        audio_path_or_array: typing.Union[str, Path, jnp.ndarray],
         sample_rate: int = None,
         stft_params: STFTParams = None,
         offset: float = 0,
         duration: float = None,
-        device: str = None,
     ):
         audio_path = None
         audio_array = None
@@ -135,14 +133,14 @@ class AudioSignal(
             audio_path = audio_path_or_array
         elif isinstance(audio_path_or_array, pathlib.Path):
             audio_path = audio_path_or_array
-        elif isinstance(audio_path_or_array, np.ndarray):
+        elif isinstance(audio_path_or_array, jnp.ndarray):
             audio_array = audio_path_or_array
-        elif torch.is_tensor(audio_path_or_array):
+        elif isinstance(audio_path_or_array, np.ndarray):
             audio_array = audio_path_or_array
         else:
             raise ValueError(
                 "audio_path_or_array must be either a Path, "
-                "string, numpy array, or torch Tensor!"
+                "string, numpy array, or jax numpy array"
             )
 
         self.path_to_file = None
@@ -152,11 +150,11 @@ class AudioSignal(
         self.stft_data = None
         if audio_path is not None:
             self.load_from_file(
-                audio_path, offset=offset, duration=duration, device=device
+                audio_path, offset=offset, duration=duration
             )
         elif audio_array is not None:
             assert sample_rate is not None, "Must set sample rate!"
-            self.load_from_array(audio_array, sample_rate, device=device)
+            self.load_from_array(audio_array, sample_rate)
 
         self.window = None
         self.stft_params = stft_params
@@ -179,10 +177,10 @@ class AudioSignal(
     @classmethod
     def excerpt(
         cls,
+        key,
         audio_path: typing.Union[str, Path],
         offset: float = None,
         duration: float = None,
-        state: typing.Union[np.random.RandomState, int] = None,
         **kwargs,
     ):
         """Randomly draw an excerpt of ``duration`` seconds from an
@@ -191,6 +189,7 @@ class AudioSignal(
 
         Parameters
         ----------
+        key: a PRNG key used as the random key.
         audio_path : typing.Union[str, Path]
             Path to audio file to grab excerpt from.
         offset : float, optional
@@ -210,13 +209,14 @@ class AudioSignal(
         --------
         >>> signal = AudioSignal.excerpt("path/to/audio", duration=5)
         """
-        info = util.info(audio_path)
+        info = soundfile.info(audio_path)
         total_duration = info.duration
+        # info = util.info(audio_path)
+        # total_duration = info.duration
 
-        state = util.random_state(state)
         lower_bound = 0 if offset is None else offset
         upper_bound = max(total_duration - duration, 0)
-        offset = state.uniform(lower_bound, upper_bound)
+        offset = jax.random.uniform(key, shape=(1,), minval=lower_bound, maxval=upper_bound).item()
 
         signal = cls(audio_path, offset=offset, duration=duration, **kwargs)
         signal.metadata["offset"] = offset
@@ -227,10 +227,10 @@ class AudioSignal(
     @classmethod
     def salient_excerpt(
         cls,
+        key,
         audio_path: typing.Union[str, Path],
         loudness_cutoff: float = None,
         num_tries: int = 8,
-        state: typing.Union[np.random.RandomState, int] = None,
         **kwargs,
     ):
         """Similar to AudioSignal.excerpt, except it extracts excerpts only
@@ -239,6 +239,7 @@ class AudioSignal(
 
         Parameters
         ----------
+        key: a PRNG key used as the random key.
         audio_path : typing.Union[str, Path]
             Path to audio file to grab excerpt from.
         loudness_cutoff : float, optional
@@ -271,14 +272,13 @@ class AudioSignal(
                 duration=5
             )
         """
-        state = util.random_state(state)
         if loudness_cutoff is None:
-            excerpt = cls.excerpt(audio_path, state=state, **kwargs)
+            excerpt = cls.excerpt(key, audio_path, **kwargs)
         else:
-            loudness = -np.inf
+            loudness = -jnp.inf
             num_try = 0
             while loudness <= loudness_cutoff:
-                excerpt = cls.excerpt(audio_path, state=state, **kwargs)
+                excerpt = cls.excerpt(key, audio_path, **kwargs)
                 loudness = excerpt.loudness()
                 num_try += 1
                 if num_tries is not None and num_try >= num_tries:
@@ -320,7 +320,7 @@ class AudioSignal(
         """
         n_samples = int(duration * sample_rate)
         return cls(
-            torch.zeros(batch_size, num_channels, n_samples), sample_rate, **kwargs
+            jnp.zeros(shape=(batch_size, num_channels, n_samples)), sample_rate, **kwargs
         )
 
     @classmethod
@@ -353,28 +353,29 @@ class AudioSignal(
             Keyword arguments to AudioSignal
         """
         n_samples = int(duration * sample_rate)
-        t = torch.linspace(0, duration, n_samples)
+        t = jnp.linspace(0, duration, n_samples)
         if shape == "sawtooth":
             from scipy.signal import sawtooth
 
-            wave_data = sawtooth(2 * np.pi * frequency * t, 0.5)
+            wave_data = sawtooth(2 * jnp.pi * frequency * t, 0.5)
         elif shape == "square":
             from scipy.signal import square
 
-            wave_data = square(2 * np.pi * frequency * t)
+            wave_data = square(2 * jnp.pi * frequency * t)
         elif shape == "sine":
-            wave_data = np.sin(2 * np.pi * frequency * t)
+            wave_data = jnp.sin(2 * jnp.pi * frequency * t)
         elif shape == "triangle":
             from scipy.signal import sawtooth
 
             # frequency is doubled by the abs call, so omit the 2 in 2pi
-            wave_data = sawtooth(np.pi * frequency * t, 0.5)
-            wave_data = -np.abs(wave_data) * 2 + 1
+            wave_data = sawtooth(jnp.pi * frequency * t, 0.5)
+            wave_data = -jnp.abs(wave_data) * 2 + 1
         else:
             raise ValueError(f"Invalid shape {shape}")
 
-        wave_data = torch.tensor(wave_data, dtype=torch.float32)
-        wave_data = wave_data.unsqueeze(0).unsqueeze(0).repeat(1, num_channels, 1)
+        wave_data = jnp.array(wave_data, dtype=jnp.float32)
+
+        wave_data = jnp.expand_dims(wave_data, axis=(0,0)).repeat(repeats=(1, num_channels, 1))
         return cls(wave_data, sample_rate, **kwargs)
 
     @classmethod
@@ -384,7 +385,7 @@ class AudioSignal(
         pad_signals: bool = False,
         truncate_signals: bool = False,
         resample: bool = False,
-        dim: int = 0,
+        axis: int = 0,
     ):
         """Creates a batched AudioSignal from a list of AudioSignals.
 
@@ -459,7 +460,7 @@ class AudioSignal(
                     f"must be True. "
                 )
         # Concatenate along the specified dimension (default 0)
-        audio_data = torch.cat([x.audio_data for x in audio_signals], dim=dim)
+        audio_data = jnp.concatenate([x.audio_data for x in audio_signals], axis=axis)
         audio_paths = [x.path_to_file for x in audio_signals]
 
         batched_signal = cls(
@@ -475,7 +476,6 @@ class AudioSignal(
         audio_path: typing.Union[str, Path],
         offset: float,
         duration: float,
-        device: str = "cpu",
     ):
         """Loads data from file. Used internally when AudioSignal
         is instantiated with a path to a file.
@@ -488,8 +488,6 @@ class AudioSignal(
             Offset in seconds
         duration : float
             Duration in seconds
-        device : str, optional
-            Device to put AudioSignal on, by default "cpu"
 
         Returns
         -------
@@ -512,22 +510,21 @@ class AudioSignal(
             )
 
         if data.ndim < 2:
-            data = data.unsqueeze(0)
+            data = jnp.expand_dims(data, axis=0)
         if data.ndim < 3:
-            data = data.unsqueeze(0)
+            data = jnp.expand_dims(data, axis=0)
         self.audio_data = data
 
         self.original_signal_length = self.signal_length
 
         self.sample_rate = sample_rate
         self.path_to_file = audio_path
-        return self.to(device)
+        return self
 
     def load_from_array(
         self,
-        audio_array: typing.Union[torch.Tensor, np.ndarray],
+        audio_array: typing.Union[jnp.ndarray],
         sample_rate: int,
-        device: str = "cpu",
     ):
         """Loads data from array, reshaping it to be exactly 3
         dimensions. Used internally when AudioSignal is called
@@ -535,12 +532,10 @@ class AudioSignal(
 
         Parameters
         ----------
-        audio_array : typing.Union[torch.Tensor, np.ndarray]
+        audio_array : typing.Union[jnp.ndarray, np.ndarray]
             Array/tensor of audio of samples.
         sample_rate : int
             Sample rate of audio
-        device : str, optional
-            Device to move audio onto, by default "cpu"
 
         Returns
         -------
@@ -549,19 +544,19 @@ class AudioSignal(
         """
         audio_data = util.ensure_tensor(audio_array)
 
-        if audio_data.dtype == torch.double:
-            audio_data = audio_data.float()
+        if audio_data.dtype == jnp.double:
+            audio_data = audio_data.astype(jnp.float32)
 
         if audio_data.ndim < 2:
-            audio_data = audio_data.unsqueeze(0)
+            audio_data = jnp.expand_dims(audio_data, axis=0)
         if audio_data.ndim < 3:
-            audio_data = audio_data.unsqueeze(0)
+            audio_data = jnp.expand_dims(audio_data, axis=0)
         self.audio_data = audio_data
 
         self.original_signal_length = self.signal_length
 
         self.sample_rate = sample_rate
-        return self.to(device)
+        return self
 
     def write(self, audio_path: typing.Union[str, Path]):
         """Writes audio to a file. Only writes the audio
@@ -597,9 +592,9 @@ class AudioSignal(
         >>> signal.write("/tmp/original.wav").low_pass(4000).write("/tmp/lowpass.wav")
 
         """
-        if self.audio_data[0].abs().max() > 1:
+        if jnp.abs(self.audio_data[0]).max() > 1:
             warnings.warn("Audio amplitude > 1 clipped when saving")
-        soundfile.write(str(audio_path), self.audio_data[0].numpy().T, self.sample_rate)
+        soundfile.write(str(audio_path), np.array(self.audio_data[0]).T, self.sample_rate)
 
         self.path_to_file = audio_path
         return self
@@ -639,14 +634,14 @@ class AudioSignal(
             Clone of AudioSignal.
         """
         clone = type(self)(
-            self.audio_data.clone(),
+            self.audio_data.copy(),
             self.sample_rate,
             stft_params=self.stft_params,
         )
         if self.stft_data is not None:
-            clone.stft_data = self.stft_data.clone()
+            clone.stft_data = self.stft_data.copy()
         if self._loudness is not None:
-            clone._loudness = self._loudness.clone()
+            clone._loudness = self._loudness.copy()
         clone.path_to_file = copy.deepcopy(self.path_to_file)
         clone.metadata = copy.deepcopy(self.metadata)
         return clone
@@ -663,11 +658,11 @@ class AudioSignal(
             Same signal, but with all tensors detached.
         """
         if self._loudness is not None:
-            self._loudness = self._loudness.detach()
+            self._loudness = jax.stop_gradient(self._loudness)
         if self.stft_data is not None:
-            self.stft_data = self.stft_data.detach()
+            self.stft_data = jax.stop_gradient(self.stft_data)
 
-        self.audio_data = self.audio_data.detach()
+        self.audio_data = jax.stop_gradient(self.audio_data)
         return self
 
     def hash(self):
@@ -710,7 +705,7 @@ class AudioSignal(
         AudioSignal
             AudioSignal with mean of channels.
         """
-        self.audio_data = self.audio_data.mean(1, keepdim=True)
+        self.audio_data = self.audio_data.mean(1, keepdims=True)
         return self
 
     def resample(self, sample_rate: int):
@@ -729,33 +724,8 @@ class AudioSignal(
         """
         if sample_rate == self.sample_rate:
             return self
-        self.audio_data = julius.resample_frac(
-            self.audio_data, self.sample_rate, sample_rate
-        )
+        self.audio_data = ResampleFrac(self.sample_rate, sample_rate)(self.audio_data)
         self.sample_rate = sample_rate
-        return self
-
-    # Tensor operations
-    def to(self, device: str):
-        """Moves all tensors contained in signal to the specified device.
-
-        Parameters
-        ----------
-        device : str
-            Device to move AudioSignal onto. Typical values are
-            "cuda", "cpu", or "cuda:n" to specify the nth gpu.
-
-        Returns
-        -------
-        AudioSignal
-            AudioSignal with all tensors moved to specified device.
-        """
-        if self._loudness is not None:
-            self._loudness = self._loudness.to(device)
-        if self.stft_data is not None:
-            self.stft_data = self.stft_data.to(device)
-        if self.audio_data is not None:
-            self.audio_data = self.audio_data.to(device)
         return self
 
     def float(self):
@@ -765,26 +735,8 @@ class AudioSignal(
         -------
         AudioSignal
         """
-        self.audio_data = self.audio_data.float()
+        self.audio_data = self.audio_data.astype(jnp.float32)
         return self
-
-    def cpu(self):
-        """Moves AudioSignal to cpu.
-
-        Returns
-        -------
-        AudioSignal
-        """
-        return self.to("cpu")
-
-    def cuda(self):  # pragma: no cover
-        """Moves AudioSignal to cuda.
-
-        Returns
-        -------
-        AudioSignal
-        """
-        return self.to("cuda")
 
     def numpy(self):
         """Detaches ``self.audio_data``, moves to cpu, and converts to numpy.
@@ -794,7 +746,7 @@ class AudioSignal(
         np.ndarray
             Audio data as a numpy array.
         """
-        return self.audio_data.detach().cpu().numpy()
+        return np.array(self.audio_data)
 
     def zero_pad(self, before: int, after: int):
         """Zero pads the audio_data tensor before and after.
@@ -811,7 +763,7 @@ class AudioSignal(
         AudioSignal
             AudioSignal with padding applied.
         """
-        self.audio_data = torch.nn.functional.pad(self.audio_data, (before, after))
+        self.audio_data = jnp.pad(self.audio_data, pad_width=((0, 0), (0, 0), (before, after)))
         return self
 
     def zero_pad_to(self, length: int, mode: str = "after"):
@@ -873,21 +825,6 @@ class AudioSignal(
         self.audio_data = self.audio_data[..., :length_in_samples]
         return self
 
-    @property
-    def device(self):
-        """Get device that AudioSignal is on.
-
-        Returns
-        -------
-        torch.device
-            Device that AudioSignal is on.
-        """
-        if self.audio_data is not None:
-            device = self.audio_data.device
-        elif self.stft_data is not None:
-            device = self.stft_data.device
-        return device
-
     # Properties
     @property
     def audio_data(self):
@@ -900,20 +837,23 @@ class AudioSignal(
 
         Parameters
         ----------
-        data : typing.Union[torch.Tensor, np.ndarray]
+        data : typing.Union[np.ndarray]
             Audio data to set.
 
         Returns
         -------
-        torch.Tensor
+        jnp.ndarray
             Audio samples.
         """
         return self._audio_data
 
     @audio_data.setter
-    def audio_data(self, data: typing.Union[torch.Tensor, np.ndarray]):
-        if data is not None:
-            assert torch.is_tensor(data), "audio_data should be torch.Tensor"
+    def audio_data(self, data: typing.Union[jnp.ndarray]):
+        # note: Avoid comparing data to None
+        if not isinstance(data, jnp.ndarray) and data is not None:
+            data = jnp.array(data)
+
+        if isinstance(data, jnp.ndarray):
             assert data.ndim == 3, "audio_data should be 3-dim (B, C, T)"
         self._audio_data = data
         # Old loudness value not guaranteed to be right, reset it.
@@ -930,16 +870,17 @@ class AudioSignal(
 
         Returns
         -------
-        torch.Tensor
+        jnp.ndarray
             Complex spectrogram data.
         """
         return self._stft_data
 
     @stft_data.setter
-    def stft_data(self, data: typing.Union[torch.Tensor, np.ndarray]):
-        if data is not None:
-            assert torch.is_tensor(data) and torch.is_complex(data)
-            if self.stft_data is not None and self.stft_data.shape != data.shape:
+    def stft_data(self, data: typing.Union[jnp.ndarray]):
+        # note: Avoid comparing data to None
+        if isinstance(data, jnp.ndarray):
+            assert isinstance(data, jnp.ndarray) and jnp.iscomplexobj(data)
+            if hasattr(self.stft_data, 'shape') and self.stft_data.shape != data.shape:
                 warnings.warn("stft_data changed shape")
         self._stft_data = data
         return
@@ -1006,37 +947,6 @@ class AudioSignal(
         return self.audio_data.shape[1]
 
     # STFT
-    @staticmethod
-    @functools.lru_cache(None)
-    def get_window(window_type: str, window_length: int, device: str):
-        """Wrapper around scipy.signal.get_window so one can also get the
-        popular sqrt-hann window. This function caches for efficiency
-        using functools.lru\_cache.
-
-        Parameters
-        ----------
-        window_type : str
-            Type of window to get
-        window_length : int
-            Length of the window
-        device : str
-            Device to put window onto.
-
-        Returns
-        -------
-        torch.Tensor
-            Window returned by scipy.signal.get_window, as a tensor.
-        """
-        from scipy import signal
-
-        if window_type == "average":
-            window = np.ones(window_length) / window_length
-        elif window_type == "sqrt_hann":
-            window = np.sqrt(signal.get_window("hann", window_length))
-        else:
-            window = signal.get_window(window_type, window_length)
-        window = torch.from_numpy(window).to(device).float()
-        return window
 
     @property
     def stft_params(self):
@@ -1045,7 +955,7 @@ class AudioSignal(
 
         This property can be set as well. If values are not defined in STFTParams,
         they are inferred automatically from the signal properties. The default is to use
-        32ms windows, with 8ms hop length, and the square root of the hann window.
+        32ms windows, with 8ms hop length, and the hann window.
 
         Returns
         -------
@@ -1063,7 +973,7 @@ class AudioSignal(
 
     @stft_params.setter
     def stft_params(self, value: STFTParams):
-        default_win_len = int(2 ** (np.ceil(np.log2(0.032 * self.sample_rate))))
+        default_win_len = 2 ** (jnp.ceil(jnp.log2(0.032 * self.sample_rate)))
         default_hop_len = default_win_len // 4
         default_win_type = "hann"
         default_match_stride = False
@@ -1138,7 +1048,7 @@ class AudioSignal(
         hop_length : int, optional
             Hop length of STFT, by default ``window_length // 4``.
         window_type : str, optional
-            Type of window to use, by default ``sqrt\_hann``.
+            Type of window to use, by default ``hann``.
         match_stride : bool, optional
             Whether to match the stride of convolutional layers, by default False
         padding_type : str, optional
@@ -1146,7 +1056,7 @@ class AudioSignal(
 
         Returns
         -------
-        torch.Tensor
+        jnp.ndarray
             STFT of audio data.
 
         Examples
@@ -1182,23 +1092,18 @@ class AudioSignal(
             self.stft_params.padding_type if padding_type is None else padding_type
         )
 
-        window = self.get_window(window_type, window_length, self.audio_data.device)
-        window = window.to(self.audio_data.device)
-
         audio_data = self.audio_data
         right_pad, pad = self.compute_stft_padding(
             window_length, hop_length, match_stride
         )
-        audio_data = torch.nn.functional.pad(
-            audio_data, (pad, pad + right_pad), padding_type
-        )
-        stft_data = torch.stft(
+        audio_data = jnp.pad(audio_data, pad_width=((0, 0), (0, 0), (pad, pad + right_pad)), mode=padding_type)
+        _, _, stft_data = jax.scipy.signal.stft(
             audio_data.reshape(-1, audio_data.shape[-1]),
-            n_fft=window_length,
-            hop_length=hop_length,
-            window=window,
-            return_complex=True,
-            center=True,
+            nperseg=window_length,
+            noverlap=window_length-hop_length,
+            window=window_type,
+            boundary='zeros',  # todo: should be 'reflect'
+            # center=True,  # todo:
         )
         _, nf, nt = stft_data.shape
         stft_data = stft_data.reshape(self.batch_size, self.num_channels, nf, nt)
@@ -1228,7 +1133,7 @@ class AudioSignal(
         hop_length : int, optional
             Hop length of STFT, by default ``window_length // 4``.
         window_type : str, optional
-            Type of window to use, by default ``sqrt\_hann``.
+            Type of window to use, by default ``hann``.
         match_stride : bool, optional
             Whether to match the stride of convolutional layers, by default False
         length : int, optional
@@ -1263,8 +1168,6 @@ class AudioSignal(
             self.stft_params.match_stride if match_stride is None else match_stride
         )
 
-        window = self.get_window(window_type, window_length, self.stft_data.device)
-
         nb, nch, nf, nt = self.stft_data.shape
         stft_data = self.stft_data.reshape(nb * nch, nf, nt)
         right_pad, pad = self.compute_stft_padding(
@@ -1278,15 +1181,16 @@ class AudioSignal(
         if match_stride:
             # Zero-pad the STFT on either side, putting back the frames that were
             # dropped in stft().
-            stft_data = torch.nn.functional.pad(stft_data, (2, 2))
+            stft_data = jnp.pad(stft_data, pad_width=((0, 0), (0, 0), (2, 2)))
 
-        audio_data = torch.istft(
+        audio_data = jax.scipy.signal.istft(
             stft_data,
-            n_fft=window_length,
-            hop_length=hop_length,
-            window=window,
-            length=length,
-            center=True,
+            nperseg=window_length,
+            noverlap=window_length-hop_length,
+            window=window_type,
+            boundary=True,
+            # length=length,  # todo:
+            # center=True,  # todo:
         )
         audio_data = audio_data.reshape(nb, nch, -1)
         if match_stride:
@@ -1332,7 +1236,7 @@ class AudioSignal(
 
     def mel_spectrogram(
         self, n_mels: int = 80, mel_fmin: float = 0.0, mel_fmax: float = None, **kwargs
-    ):
+    ) -> jnp.ndarray:
         """Computes a Mel spectrogram.
 
         Parameters
@@ -1348,11 +1252,11 @@ class AudioSignal(
 
         Returns
         -------
-        torch.Tensor [shape=(batch, channels, mels, time)]
+        jnp.ndarray [shape=(batch, channels, mels, time)]
             Mel spectrogram.
         """
         stft = self.stft(**kwargs)
-        magnitude = torch.abs(stft)
+        magnitude = jnp.abs(stft)
 
         nf = magnitude.shape[2]
         mel_basis = self.get_mel_filters(
@@ -1362,15 +1266,15 @@ class AudioSignal(
             fmin=mel_fmin,
             fmax=mel_fmax,
         )
-        mel_basis = torch.from_numpy(mel_basis).to(self.device)
+        mel_basis = jnp.array(mel_basis)
 
-        mel_spectrogram = magnitude.transpose(2, -1) @ mel_basis.T
-        mel_spectrogram = mel_spectrogram.transpose(-1, 2)
+        mel_spectrogram = magnitude.transpose(0, 1, 3, 2) @ mel_basis.T
+        mel_spectrogram = mel_spectrogram.transpose(0, 1, 3, 2)
         return mel_spectrogram
 
     @staticmethod
     @functools.lru_cache(None)
-    def get_dct(n_mfcc: int, n_mels: int, norm: str = "ortho", device: str = None):
+    def get_dct(n_mfcc: int, n_mels: int, norm: str = "ortho"):
         """Create a discrete cosine transform (DCT) transformation matrix with shape (``n_mels``, ``n_mfcc``),
         it can be normalized depending on norm. For more information about dct:
         http://en.wikipedia.org/wiki/Discrete_cosine_transform#DCT-II
@@ -1383,17 +1287,14 @@ class AudioSignal(
             Number of mels
         norm   : str
             Use "ortho" to get a orthogonal matrix or None, by default "ortho"
-        device : str, optional
-            Device to load the transformation matrix on, by default None
 
         Returns
         -------
-        torch.Tensor [shape=(n_mels, n_mfcc)] T
+        jnp.ndarray [shape=(n_mels, n_mfcc)] T
             The dct transformation matrix.
         """
         from torchaudio.functional import create_dct
-
-        return create_dct(n_mfcc, n_mels, norm).to(device)
+        return create_dct(n_mfcc, n_mels, norm)
 
     def mfcc(
         self, n_mfcc: int = 40, n_mels: int = 80, log_offset: float = 1e-6, **kwargs
@@ -1413,16 +1314,16 @@ class AudioSignal(
 
         Returns
         -------
-        torch.Tensor [shape=(batch, channels, mfccs, time)]
+        jnp.ndarray [shape=(batch, channels, mfccs, time)]
             MFCCs.
         """
 
         mel_spectrogram = self.mel_spectrogram(n_mels, **kwargs)
-        mel_spectrogram = torch.log(mel_spectrogram + log_offset)
-        dct_mat = self.get_dct(n_mfcc, n_mels, "ortho", self.device)
+        mel_spectrogram = jnp.log(mel_spectrogram + log_offset)
+        dct_mat = self.get_dct(n_mfcc, n_mels, "ortho")
 
-        mfcc = mel_spectrogram.transpose(-1, -2) @ dct_mat
-        mfcc = mfcc.transpose(-1, -2)
+        mfcc = mel_spectrogram.transpose(0, 1, 3, 2) @ dct_mat
+        mfcc = mfcc.transpose(0, 1, 3, 2)
         return mfcc
 
     @property
@@ -1434,7 +1335,7 @@ class AudioSignal(
 
         Returns
         -------
-        torch.Tensor
+        jnp.ndarray
             Magnitude of STFT.
 
         Examples
@@ -1447,11 +1348,11 @@ class AudioSignal(
         """
         if self.stft_data is None:
             self.stft()
-        return torch.abs(self.stft_data)
+        return jnp.abs(self.stft_data)
 
     @magnitude.setter
     def magnitude(self, value):
-        self.stft_data = value * torch.exp(1j * self.phase)
+        self.stft_data = value * jnp.exp(1j * self.phase)
         return
 
     def log_magnitude(
@@ -1473,17 +1374,18 @@ class AudioSignal(
 
         Returns
         -------
-        torch.Tensor
+        jnp.ndarray
             Log-magnitude spectrogram
         """
         magnitude = self.magnitude
 
         amin = amin**2
-        log_spec = 10.0 * torch.log10(magnitude.pow(2).clamp(min=amin))
-        log_spec -= 10.0 * np.log10(np.maximum(amin, ref_value))
+
+        log_spec = 10.0 * jnp.log10(jnp.clip(jnp.square(magnitude), a_min=amin))
+        log_spec = log_spec - 10.0 * jnp.log10(jnp.maximum(amin, ref_value))
 
         if top_db is not None:
-            log_spec = torch.maximum(log_spec, log_spec.max() - top_db)
+            log_spec = jnp.maximum(log_spec, log_spec.max() - top_db)
         return log_spec
 
     @property
@@ -1495,7 +1397,7 @@ class AudioSignal(
 
         Returns
         -------
-        torch.Tensor
+        jnp.ndarray
             Phase of STFT.
 
         Examples
@@ -1508,21 +1410,21 @@ class AudioSignal(
         """
         if self.stft_data is None:
             self.stft()
-        return torch.angle(self.stft_data)
+        return jnp.angle(self.stft_data)
 
     @phase.setter
     def phase(self, value):
-        self.stft_data = self.magnitude * torch.exp(1j * value)
+        self.stft_data = self.magnitude * jnp.exp(1j * value)
         return
 
     # Operator overloading
     def __add__(self, other):
         new_signal = self.clone()
-        new_signal.audio_data += util._get_value(other)
+        new_signal.audio_data = new_signal.audio_data + util._get_value(other)
         return new_signal
 
     def __iadd__(self, other):
-        self.audio_data += util._get_value(other)
+        self.audio_data = self.audio_data + util._get_value(other)
         return self
 
     def __radd__(self, other):
@@ -1530,20 +1432,20 @@ class AudioSignal(
 
     def __sub__(self, other):
         new_signal = self.clone()
-        new_signal.audio_data -= util._get_value(other)
+        new_signal.audio_data = new_signal.audio_data - util._get_value(other)
         return new_signal
 
     def __isub__(self, other):
-        self.audio_data -= util._get_value(other)
+        self.audio_data = self.audio_data - util._get_value(other)
         return self
 
     def __mul__(self, other):
         new_signal = self.clone()
-        new_signal.audio_data *= util._get_value(other)
+        new_signal.audio_data = new_signal.audio_data * util._get_value(other)
         return new_signal
 
     def __imul__(self, other):
-        self.audio_data *= util._get_value(other)
+        self.audio_data = self.audio_data * util._get_value(other)
         return self
 
     def __rmul__(self, other):
@@ -1560,7 +1462,6 @@ class AudioSignal(
             "num_channels": self.num_channels if self.num_channels else "[unknown]",
             "audio_data.shape": self.audio_data.shape,
             "stft_params": self.stft_params,
-            "device": self.device,
         }
 
         return info
@@ -1585,8 +1486,7 @@ class AudioSignal(
         | sample_rate | 44100 |
         | num_channels | 1 |
         | audio_data.shape | torch.Size([1, 1, 44100]) |
-        | stft_params | STFTParams(window_length=2048, hop_length=512, window_type='sqrt_hann', match_stride=False) |
-        | device | cpu |
+        | stft_params | STFTParams(window_length=2048, hop_length=512, window_type='hann', match_stride=False) |
         """
         info = self._info()
 
@@ -1620,23 +1520,23 @@ class AudioSignal(
     # Comparison
     def __eq__(self, other):
         for k, v in list(self.__dict__.items()):
-            if torch.is_tensor(v):
-                if not torch.allclose(v, other.__dict__[k], atol=1e-6):
-                    max_error = (v - other.__dict__[k]).abs().max()
+            if isinstance(v, jnp.ndarray):
+                if not jnp.allclose(v, other.__dict__[k], atol=1e-6):
+                    max_error = jnp.abs(v - other.__dict__[k]).max()
                     print(f"Max abs error for {k}: {max_error}")
                     return False
         return True
 
     # Indexing
     def __getitem__(self, key):
-        if torch.is_tensor(key) and key.ndim == 0 and key.item() is True:
+        if isinstance(key, jnp.ndarray) and key.ndim == 0 and key.item() is True:
             assert self.batch_size == 1
             audio_data = self.audio_data
             _loudness = self._loudness
             stft_data = self.stft_data
 
         elif isinstance(key, (bool, int, list, slice, tuple)) or (
-            torch.is_tensor(key) and key.ndim <= 1
+            isinstance(key, jnp.ndarray) and key.ndim <= 1
         ):
             # Indexing only on the batch dimension.
             # Then let's copy over relevant stuff.
@@ -1660,7 +1560,7 @@ class AudioSignal(
             self.audio_data[key] = value
             return
 
-        if torch.is_tensor(key) and key.ndim == 0 and key.item() is True:
+        if isinstance(key, jnp.ndarray) and key.ndim == 0 and key.item() is True:
             assert self.batch_size == 1
             self.audio_data = value.audio_data
             self._loudness = value._loudness
@@ -1668,7 +1568,7 @@ class AudioSignal(
             return
 
         elif isinstance(key, (bool, int, list, slice, tuple)) or (
-            torch.is_tensor(key) and key.ndim <= 1
+            isinstance(key, jnp.ndarray) and key.ndim <= 1
         ):
             if self.audio_data is not None and value.audio_data is not None:
                 self.audio_data[key] = value.audio_data

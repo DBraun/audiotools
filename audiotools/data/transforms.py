@@ -4,7 +4,6 @@ from inspect import signature
 from typing import List
 
 import numpy as np
-import torch
 from flatten_dict import flatten
 from flatten_dict import unflatten
 from numpy.random import RandomState
@@ -14,7 +13,9 @@ from ..core import AudioSignal
 from ..core import util
 from .datasets import AudioLoader
 
-tt = torch.tensor
+import jax.numpy as jnp
+
+jnpndarray = jnp.ndarray
 """Shorthand for converting things to torch.tensor."""
 
 
@@ -112,14 +113,14 @@ class BaseTransform:
         return {}
 
     @staticmethod
-    def apply_mask(batch: dict, mask: torch.Tensor):
+    def apply_mask(batch: dict, mask: jnp.ndarray):
         """Applies a mask to the batch.
 
         Parameters
         ----------
         batch : dict
             Batch whose values will be masked in the ``transform`` pass.
-        mask : torch.Tensor
+        mask : jnp.ndarray
             Mask to apply to batch.
 
         Returns
@@ -158,7 +159,7 @@ class BaseTransform:
         tfm_kwargs = self._prepare(kwargs)
         mask = tfm_kwargs["mask"]
 
-        if torch.any(mask):
+        if jnp.any(mask):
             tfm_kwargs = self.apply_mask(tfm_kwargs, mask)
             tfm_kwargs = {k: v for k, v in tfm_kwargs.items() if k != "mask"}
             signal[mask] = self._transform(signal[mask], **tfm_kwargs)
@@ -211,12 +212,12 @@ class BaseTransform:
         params = self._instantiate(state, **kwargs)
         for k in list(params.keys()):
             v = params[k]
-            if isinstance(v, (AudioSignal, torch.Tensor, dict)):
+            if isinstance(v, (AudioSignal, jnp.ndarray, dict)):
                 params[k] = v
             else:
-                params[k] = tt(v)
+                params[k] = jnpndarray(v)
         mask = state.rand() <= self.prob
-        params[f"mask"] = tt(mask)
+        params[f"mask"] = jnpndarray(mask)
 
         # Put the params into a nested dictionary that will be
         # used later when calling the transform. This is to avoid
@@ -469,7 +470,7 @@ class Choose(Compose):
         for i, t in enumerate(self.transforms):
             mask = kwargs[t.name]["mask"]
             if mask.item():
-                kwargs[t.name]["mask"] = tt(i == tfm_idx)
+                kwargs[t.name]["mask"] = jnpndarray(i == tfm_idx)
             one_hot.append(kwargs[t.name]["mask"])
         kwargs["one_hot"] = one_hot
         return kwargs
@@ -1081,7 +1082,7 @@ class Silence(BaseTransform):
     def _transform(self, signal):
         _loudness = signal._loudness
         signal = AudioSignal(
-            torch.zeros_like(signal.audio_data),
+            jnp.zeros_like(signal.audio_data),
             sample_rate=signal.sample_rate,
             stft_params=signal.stft_params,
         )
@@ -1453,87 +1454,87 @@ class Smoothing(BaseTransform):
         return out
 
 
-class TimeNoise(TimeMask):
-    """Similar to :py:func:`audiotools.data.transforms.TimeMask`, but
-    replaces with noise instead of zeros.
+# class TimeNoise(TimeMask):
+#     """Similar to :py:func:`audiotools.data.transforms.TimeMask`, but
+#     replaces with noise instead of zeros.
+#
+#     Parameters
+#     ----------
+#     t_center : tuple, optional
+#         Center time in terms of 0.0 and 1.0 (duration of signal),
+#         by default ("uniform", 0.0, 1.0)
+#     t_width : tuple, optional
+#         Width of dropped out portion, by default ("const", 0.025)
+#     name : str, optional
+#         Name of this transform, used to identify it in the dictionary
+#         produced by ``self.instantiate``, by default None
+#     prob : float, optional
+#         Probability of applying this transform, by default 1.0
+#     """
+#
+#     def __init__(
+#         self,
+#         t_center: tuple = ("uniform", 0.0, 1.0),
+#         t_width: tuple = ("const", 0.025),
+#         name: str = None,
+#         prob: float = 1,
+#     ):
+#         super().__init__(t_center=t_center, t_width=t_width, name=name, prob=prob)
+#
+#     def _transform(self, signal, tmin_s: float, tmax_s: float):
+#         signal = signal.mask_timesteps(tmin_s=tmin_s, tmax_s=tmax_s, val=0.0)
+#         mag, phase = signal.magnitude, signal.phase
+#
+#         mag_r, phase_r = torch.randn_like(mag), torch.randn_like(phase)
+#         mask = (mag == 0.0) * (phase == 0.0)
+#
+#         mag[mask] = mag_r[mask]
+#         phase[mask] = phase_r[mask]
+#
+#         signal.magnitude = mag
+#         signal.phase = phase
+#         return signal
 
-    Parameters
-    ----------
-    t_center : tuple, optional
-        Center time in terms of 0.0 and 1.0 (duration of signal),
-        by default ("uniform", 0.0, 1.0)
-    t_width : tuple, optional
-        Width of dropped out portion, by default ("const", 0.025)
-    name : str, optional
-        Name of this transform, used to identify it in the dictionary
-        produced by ``self.instantiate``, by default None
-    prob : float, optional
-        Probability of applying this transform, by default 1.0
-    """
 
-    def __init__(
-        self,
-        t_center: tuple = ("uniform", 0.0, 1.0),
-        t_width: tuple = ("const", 0.025),
-        name: str = None,
-        prob: float = 1,
-    ):
-        super().__init__(t_center=t_center, t_width=t_width, name=name, prob=prob)
-
-    def _transform(self, signal, tmin_s: float, tmax_s: float):
-        signal = signal.mask_timesteps(tmin_s=tmin_s, tmax_s=tmax_s, val=0.0)
-        mag, phase = signal.magnitude, signal.phase
-
-        mag_r, phase_r = torch.randn_like(mag), torch.randn_like(phase)
-        mask = (mag == 0.0) * (phase == 0.0)
-
-        mag[mask] = mag_r[mask]
-        phase[mask] = phase_r[mask]
-
-        signal.magnitude = mag
-        signal.phase = phase
-        return signal
-
-
-class FrequencyNoise(FrequencyMask):
-    """Similar to :py:func:`audiotools.data.transforms.FrequencyMask`, but
-    replaces with noise instead of zeros.
-
-    Parameters
-    ----------
-    f_center : tuple, optional
-        Center frequency between 0.0 and 1.0 (Nyquist), by default ("uniform", 0.0, 1.0)
-    f_width : tuple, optional
-        Width of zero'd out band, by default ("const", 0.1)
-    name : str, optional
-        Name of this transform, used to identify it in the dictionary
-        produced by ``self.instantiate``, by default None
-    prob : float, optional
-        Probability of applying this transform, by default 1.0
-    """
-
-    def __init__(
-        self,
-        f_center: tuple = ("uniform", 0.0, 1.0),
-        f_width: tuple = ("const", 0.1),
-        name: str = None,
-        prob: float = 1,
-    ):
-        super().__init__(f_center=f_center, f_width=f_width, name=name, prob=prob)
-
-    def _transform(self, signal, fmin_hz: float, fmax_hz: float):
-        signal = signal.mask_frequencies(fmin_hz=fmin_hz, fmax_hz=fmax_hz)
-        mag, phase = signal.magnitude, signal.phase
-
-        mag_r, phase_r = torch.randn_like(mag), torch.randn_like(phase)
-        mask = (mag == 0.0) * (phase == 0.0)
-
-        mag[mask] = mag_r[mask]
-        phase[mask] = phase_r[mask]
-
-        signal.magnitude = mag
-        signal.phase = phase
-        return signal
+# class FrequencyNoise(FrequencyMask):
+#     """Similar to :py:func:`audiotools.data.transforms.FrequencyMask`, but
+#     replaces with noise instead of zeros.
+#
+#     Parameters
+#     ----------
+#     f_center : tuple, optional
+#         Center frequency between 0.0 and 1.0 (Nyquist), by default ("uniform", 0.0, 1.0)
+#     f_width : tuple, optional
+#         Width of zero'd out band, by default ("const", 0.1)
+#     name : str, optional
+#         Name of this transform, used to identify it in the dictionary
+#         produced by ``self.instantiate``, by default None
+#     prob : float, optional
+#         Probability of applying this transform, by default 1.0
+#     """
+#
+#     def __init__(
+#         self,
+#         f_center: tuple = ("uniform", 0.0, 1.0),
+#         f_width: tuple = ("const", 0.1),
+#         name: str = None,
+#         prob: float = 1,
+#     ):
+#         super().__init__(f_center=f_center, f_width=f_width, name=name, prob=prob)
+#
+#     def _transform(self, signal, fmin_hz: float, fmax_hz: float):
+#         signal = signal.mask_frequencies(fmin_hz=fmin_hz, fmax_hz=fmax_hz)
+#         mag, phase = signal.magnitude, signal.phase
+#
+#         mag_r, phase_r = torch.randn_like(mag), torch.randn_like(phase)
+#         mask = (mag == 0.0) * (phase == 0.0)
+#
+#         mag[mask] = mag_r[mask]
+#         phase[mask] = phase_r[mask]
+#
+#         signal.magnitude = mag
+#         signal.phase = phase
+#         return signal
 
 
 class SpectralDenoising(Equalizer):

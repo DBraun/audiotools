@@ -2,6 +2,7 @@ import numpy as np
 
 from audiotools import AudioSignal
 from audiotools import metrics
+from functools import partial
 
 
 def test_multiscale_stft():
@@ -10,7 +11,7 @@ def test_multiscale_stft():
     x = AudioSignal.excerpt(audio_path, duration=1)
     y = x.deepcopy()
 
-    loss = metrics.spectral.MultiScaleSTFTLoss()
+    loss = metrics.spectral.multiscale_stft_loss
 
     loss_val_identity = loss(x, y)
     assert np.allclose(loss_val_identity, 0)
@@ -22,7 +23,7 @@ def test_multiscale_stft():
 
     # Using SI-SDR Loss
     y = x.deepcopy()
-    loss = metrics.spectral.MultiScaleSTFTLoss(loss_fn=metrics.distance.SISDRLoss())
+    loss = partial(metrics.spectral.multiscale_stft_loss, loss_fn=metrics.distance.sisdr_loss)
 
     loss_val_identity = loss(x, y)
     assert np.allclose(loss_val_identity, -np.inf)
@@ -39,7 +40,7 @@ def test_mel_spectrogram_loss():
     x = AudioSignal.excerpt(audio_path, duration=1)
     y = x.deepcopy()
 
-    loss = metrics.spectral.MelSpectrogramLoss()
+    loss = metrics.spectral.mel_spectrogram_loss
 
     loss_val_identity = loss(x, y)
     assert np.allclose(loss_val_identity, 0)
@@ -56,7 +57,7 @@ def test_phase_loss():
     x = AudioSignal.excerpt(audio_path, duration=1)
     y = x.deepcopy()
 
-    loss = metrics.spectral.PhaseLoss()
+    loss = metrics.spectral.phase_loss
 
     loss_val_identity = loss(x, y)
     assert np.allclose(loss_val_identity, 0)

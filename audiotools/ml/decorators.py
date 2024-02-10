@@ -4,8 +4,6 @@ import time
 from collections import defaultdict
 from functools import wraps
 
-import torch
-import torch.distributed as dist
 from rich import box
 from rich.console import Console
 from rich.console import Group
@@ -20,8 +18,11 @@ from rich.progress import TimeElapsedColumn
 from rich.progress import TimeRemainingColumn
 from rich.rule import Rule
 from rich.table import Table
-from torch.utils.tensorboard import SummaryWriter
+from clu import metric_writers
 
+from audiotools.core.util import is_tensor
+import jax.numpy as jnp
+from jax import lax
 
 # This is here so that the history can be pickled.
 def default_list():
@@ -162,7 +163,7 @@ class Tracker:
 
     def __init__(
         self,
-        writer: SummaryWriter = None,
+        writer: metric_writers.MetricWriter = None,
         log_file: str = None,
         rank: int = 0,
         console_width: int = 100,
@@ -173,8 +174,8 @@ class Tracker:
 
         Parameters
         ----------
-        writer : SummaryWriter, optional
-            A SummaryWriter object for logging the metrics, by default None.
+        writer : clu.metric_writers.MetricWriter, optional
+            A MetricWriter object for logging the metrics, by default None.
         log_file : str, optional
             The path to the log file, by default None.
         rank : int, optional
@@ -285,7 +286,7 @@ class Tracker:
         label: str,
         length: int,
         completed: int = 0,
-        op: dist.ReduceOp = dist.ReduceOp.AVG,
+        op: str = 'avg',
         ddp_active: bool = "LOCAL_RANK" in os.environ,
     ):
         """
@@ -299,8 +300,8 @@ class Tracker:
             The total number of iterations to be completed.
         completed : int, optional
             The number of iterations already completed, by default 0.
-        op : dist.ReduceOp, optional
-            The reduce operation to be used, by default dist.ReduceOp.AVG.
+        op : str, optional
+            The reduce operation to be used, by default 'avg'.
         ddp_active : bool, optional
             Whether the DistributedDataParallel is active, by default "LOCAL_RANK" in os.environ.
         """
@@ -326,13 +327,14 @@ class Tracker:
                 scalar_keys = []
                 for k, v in output.items():
                     if isinstance(v, (int, float)):
-                        v = torch.tensor([v])
-                    if not torch.is_tensor(v):
+                        v = jnp.ndarray([v])
+                    if not is_tensor(v):
                         continue
                     if ddp_active and v.is_cuda:  # pragma: no cover
-                        dist.all_reduce(v, op=op)
+                        if op == 'avg':
+                            v = lax.pmean(v)  # todo:
                     output[k] = v.detach()
-                    if torch.numel(v) == 1:
+                    if jnp.size(v) == 1:
                         scalar_keys.append(k)
                         output[k] = v.item()
 
@@ -379,7 +381,7 @@ class Tracker:
                     for k, v in metrics.items():
                         v = v() if isinstance(v, Mean) else v
                         if self.writer is not None:
-                            self.writer.add_scalar(f"{k}/{label}", v, self.step)
+                            self.writer.write_scalars(self.step, {f"{k}/{label}": v})
                         if label in self.history:
                             self.history[label][k].append(v)
 

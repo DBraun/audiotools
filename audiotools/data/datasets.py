@@ -5,8 +5,6 @@ from typing import List
 from typing import Union
 
 import numpy as np
-from torch.utils.data import SequentialSampler
-from torch.utils.data.distributed import DistributedSampler
 
 from ..core import AudioSignal
 from ..core import util
@@ -28,9 +26,6 @@ class AudioLoader:
         Weights to sample audio files from each source, by default None
     relative_path : str, optional
         Path audio should be loaded relative to, by default ""
-    transform : Callable, optional
-        Transform to instantiate alongside audio sample,
-        by default None
     ext : List[str]
         List of extensions to find audio within each source by. Can
         also be a file name (e.g. "vocals.wav"). by default
@@ -45,7 +40,6 @@ class AudioLoader:
         self,
         sources: List[str] = None,
         weights: List[float] = None,
-        transform: Callable = None,
         relative_path: str = "",
         ext: List[str] = util.AUDIO_EXTENSIONS,
         shuffle: bool = True,
@@ -66,7 +60,6 @@ class AudioLoader:
 
         self.sources = sources
         self.weights = weights
-        self.transform = transform
 
     def __call__(
         self,
@@ -130,8 +123,6 @@ class AudioLoader:
             "source": str(self.sources[source_idx]),
             "path": str(path),
         }
-        if self.transform is not None:
-            item["transform_args"] = self.transform.instantiate(state, signal=signal)
         return item
 
 
@@ -184,8 +175,6 @@ class AudioDataset:
         Loudness cutoff threshold for audio samples, by default -40
     num_channels : int, optional
         Number of channels in output audio, by default 1
-    transform : Callable, optional
-        Transform to instantiate alongside each dataset item, by default None
     aligned : bool, optional
         Whether the loaders should be sampled in an aligned manner (e.g. same
         offset, duration, and matched file name), by default False
@@ -364,7 +353,6 @@ class AudioDataset:
         offset: float = None,
         loudness_cutoff: float = -40,
         num_channels: int = 1,
-        transform: Callable = None,
         aligned: bool = False,
         shuffle_loaders: bool = False,
         matcher: Callable = default_matcher,
@@ -381,7 +369,6 @@ class AudioDataset:
         self.num_channels = num_channels
 
         self.length = n_examples
-        self.transform = transform
         self.sample_rate = sample_rate
         self.duration = duration
         self.offset = offset
@@ -438,10 +425,6 @@ class AudioDataset:
         item = {k: item[k] for k in keys}
 
         item["idx"] = idx
-        if self.transform is not None:
-            item["transform_args"] = self.transform.instantiate(
-                state=state, signal=item[keys[0]]["signal"]
-            )
 
         # If there's only one loader, pop it up
         # to the main dictionary, instead of keeping it
@@ -485,33 +468,3 @@ class ConcatDataset(AudioDataset):
     def __getitem__(self, idx):
         dataset = self.datasets[idx % len(self.datasets)]
         return dataset[idx // len(self.datasets)]
-
-
-class ResumableDistributedSampler(DistributedSampler):  # pragma: no cover
-    """Distributed sampler that can be resumed from a given start index."""
-
-    def __init__(self, dataset, start_idx: int = None, **kwargs):
-        super().__init__(dataset, **kwargs)
-        # Start index, allows to resume an experiment at the index it was
-        self.start_idx = start_idx // self.num_replicas if start_idx is not None else 0
-
-    def __iter__(self):
-        for i, idx in enumerate(super().__iter__()):
-            if i >= self.start_idx:
-                yield idx
-        self.start_idx = 0  # set the index back to 0 so for the next epoch
-
-
-class ResumableSequentialSampler(SequentialSampler):  # pragma: no cover
-    """Sequential sampler that can be resumed from a given start index."""
-
-    def __init__(self, dataset, start_idx: int = None, **kwargs):
-        super().__init__(dataset, **kwargs)
-        # Start index, allows to resume an experiment at the index it was
-        self.start_idx = start_idx if start_idx is not None else 0
-
-    def __iter__(self):
-        for i, idx in enumerate(super().__iter__()):
-            if i >= self.start_idx:
-                yield idx
-        self.start_idx = 0  # set the index back to 0 so for the next epoch
