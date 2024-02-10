@@ -12,7 +12,7 @@ from typing import List
 
 import gradio as gr
 
-from audiotools.core.util import find_audio
+from audiotools.backend.torch.core.util import find_audio
 
 ################################################################
 ### Logic for audio player, and adding audio / play buttons. ###

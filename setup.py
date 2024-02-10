@@ -1,12 +1,35 @@
+import os
+
 from setuptools import find_packages
 from setuptools import setup
+
+
+def read(rel_path):
+    here = os.path.abspath(os.path.dirname(__file__))
+    with open(os.path.join(here, rel_path)) as fp:
+        return fp.read()
+
+
+def get_version(rel_path):
+    for line in read(rel_path).splitlines():
+        if line.startswith("__version__"):
+            delim = '"' if '"' in line else "'"
+            return line.split(delim)[1]
+    raise RuntimeError("Unable to find version string.")
+
 
 with open("README.md") as f:
     long_description = f.read()
 
+if os.path.exists("audiotools/version.py"):
+    VERSION = get_version("audiotools/version.py")
+else:
+    VERSION = get_version("audiotools/__init__.py")
+
+
 setup(
     name="descript-audiotools",
-    version="0.7.3",
+    version=VERSION,
     classifiers=[
         "Intended Audience :: Developers",
         "Intended Audience :: Education",
@@ -53,6 +76,7 @@ setup(
         "flatten-dict",
         "markdown2",
         "randomname",
+        "namex",
         # Have to freeze protobuf version, https://github.com/protocolbuffers/protobuf/issues/10051
         # Borrowing pin from tensorboard source: https://github.com/tensorflow/tensorboard/commit/fd4f5ff79374252e313c2e7e9b247bc49ab0d54d.
         "protobuf >= 3.9.2, < 3.20",

@@ -3,14 +3,10 @@
 Object-oriented handling of audio signals, with fast augmentation routines, batching, padding, and more.
 
 ## Installation
-```
-pip install git+https://github.com/descriptinc/audiotools
-```
-OR
 ```bash
 git clone https://github.com/descriptinc/audiotools
 cd audiotools
-pip install .
+python pip_build.py --install
 ```
 
 ## Documentation
@@ -48,6 +44,24 @@ signal.play() # Play back the low-passed version of the signal
 ```
 
 For more, see the [documentation](##Documentation).
+
+## Backends
+
+Audiotools supports both PyTorch and JAX backends. The default is PyTorch. You can select the JAX backend in two ways:
+
+Export an environment variable in a command prompt/Terminal before executing a Python script which uses audiotools.
+```bash
+export AUDIOTOOLS_BACKEND="jax"
+```
+
+Alternatively, export an environment variable inside Python before importing audiotools:
+
+```python
+import os
+os.environ["AUDIOTOOLS_BACKEND"] = "jax"
+
+import audiotools
+```
 
 ### Install hooks
 
