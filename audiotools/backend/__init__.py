@@ -30,3 +30,21 @@ from audiotools.backend.config import set_epsilon
 from audiotools.backend.config import set_floatx
 from audiotools.backend.config import set_image_data_format
 from audiotools.backend.config import standardize_data_format
+
+# Import backend functions.
+if backend.backend() == "torch":
+    from audiotools.backend.torch import *  # noqa: F403
+
+    distribution_lib = None
+elif backend.backend() == "jax":
+    from audiotools.backend.jax import *  # noqa: F403
+elif backend.backend() == "tensorflow":
+    raise ValueError("Audiotools does not have a tensorflow backend in development yet.")
+    # from audiotools.backend.tensorflow import *  # noqa: F403
+elif backend.backend() == "numpy":
+    raise ValueError("Audiotools does not have a numpy backend in development yet.")
+    # from audiotools.backend.numpy import *  # noqa: F403
+
+    distribution_lib = None
+else:
+    raise ValueError(f"Unable to import backend : {backend()}")
