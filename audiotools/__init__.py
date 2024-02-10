@@ -3,7 +3,7 @@
 
 # from audiotools import activations
 # from audiotools import applications
-from audiotools import backend
+# from audiotools import backend
 # from audiotools import constraints
 # from audiotools import datasets
 # from audiotools import initializers
@@ -13,8 +13,8 @@ from audiotools import backend
 # from audiotools import optimizers
 # from audiotools import regularizers
 # from audiotools import utils
-from audiotools.backend import AudioSignal
-from audiotools.backend import core
+from audiotools.backend import *
+# from audiotools.backend import core
 # from audiotools.layers import Input
 # from audiotools.layers import Layer
 # from audiotools.models import Functional
