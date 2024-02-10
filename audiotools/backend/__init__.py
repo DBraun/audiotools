@@ -32,16 +32,16 @@ from audiotools.backend.config import set_image_data_format
 from audiotools.backend.config import standardize_data_format
 
 # Import backend functions.
-if backend.backend() == "torch":
+if backend() == "torch":
     from audiotools.backend.torch import *  # noqa: F403
 
     distribution_lib = None
-elif backend.backend() == "jax":
+elif backend() == "jax":
     from audiotools.backend.jax import *  # noqa: F403
-elif backend.backend() == "tensorflow":
+elif backend() == "tensorflow":
     raise ValueError("Audiotools does not have a tensorflow backend in development yet.")
     # from audiotools.backend.tensorflow import *  # noqa: F403
-elif backend.backend() == "numpy":
+elif backend() == "numpy":
     raise ValueError("Audiotools does not have a numpy backend in development yet.")
     # from audiotools.backend.numpy import *  # noqa: F403
 
