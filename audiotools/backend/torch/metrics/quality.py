@@ -3,7 +3,7 @@ import os
 import numpy as np
 import torch
 
-from audiotools.backend.torch import AudioSignal
+from audiotools.backend.torch.core.audio_signal import AudioSignal
 
 
 def stoi(
